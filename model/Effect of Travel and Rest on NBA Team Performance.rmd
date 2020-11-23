@@ -118,7 +118,7 @@ y_{ijt} = (\theta_i + \alpha_{i} home_{it}) - (\theta_j + \alpha_{j} home_{jt})
 \]
 where $y_{ijt}$ is the margin of victory of $team_i$ over $team_j$ at time $t$.
 We can interpret the parameter $\theta_i$ as the *skill* of a team, as it relates to the team's average effect on their game's margin. Similarly, we can interpret the parameter $\alpha$ as the team's average benefit from playing at home.
-The full details of the model are included in the `model.stan` file. The model borrows methodology from [here](`http://doogan.us/nj/NCAA2018.html`).
+The full details of the model are included in the [`model.stan`](https://github.com/abrahme/travel-nba-schedule/blob/main/model/model.stan) file. The model borrows methodology from [here](`http://doogan.us/nj/NCAA2018.html`).
 
 ```{r,echo=FALSE,results="hide"}
 suppressPackageStartupMessages(library(rstan))
@@ -178,7 +178,7 @@ Here, we can extract the latent skill of each team, as well as their home team a
 \[
   y_{ijt} = (\theta_i + \alpha_{i} home_{it} - \omega_i fatigue_{it}) - (\theta_j + \alpha_{j} home_{jt} - \omega_j fatigue_{jt})
 \]
- Further model details are located in `model_rest.stan`.
+ Further model details are located in [`model_rest.stan`](https://github.com/abrahme/travel-nba-schedule/blob/main/model/model_rest.stan).
 
 ```{r,echo=FALSE,results="hide"}
 sd_rest <- list(N = nrow(d),
