@@ -15,14 +15,11 @@ parameters{
     vector<lower=0>[2] sigma_p; // sd for intercept and slope
     vector[2] beta; // intercept and slope hyper priors
     corr_matrix[2] Omega; // correlation matrix
-    vector<lower=0>[N_g] omega_raw;
+    vector<lower=0>[N_g] omega;
     real<lower=0> sigma;
     real<lower=0> tau_omega;
 }
-transformed parameters{
-    vector[N_g] omega;
-    omega = omega_raw*tau_omega;
-}
+
 model{
     // vector for conditional mean storage
     vector[N] mu;
@@ -33,7 +30,7 @@ model{
     tau_omega ~ cauchy(0,.25)T[0,];
     sigma ~ cauchy(0,1)T[0,];
     beta_p ~ multi_normal(beta, quad_form_diag(Omega,sigma_p));
-    omega_raw ~ lognormal(0,1);
+    omega ~ lognormal(0,tau_omega);
 
     // define mu for the Gaussian
     for( t in 1:N ) {
