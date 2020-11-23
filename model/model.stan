@@ -34,5 +34,5 @@ model{
 
 // the likelihood
     y ~ normal(mu,sigma);
-    z ~ bernoulli_logit(mu + sigma); // regularize huge blowouts
+    z ~ bernoulli_logit(mu);
 }
