@@ -20,6 +20,7 @@ model{
     vector[N] mu;
 
     // priors
+    Omega ~ lkj_corr(2);
     sigma_p ~ exponential(1);
     sigma ~ cauchy(0,1)T[0,];
     beta ~ normal(0,1);
