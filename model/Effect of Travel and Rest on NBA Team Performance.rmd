@@ -1,0 +1,307 @@
+---
+title: "Effect of Travel and Rest on NBA Perceived Team Strength"
+author: Abhijit Brahme
+date: 11/21/2020
+output: html_document
+---
+
+## Introduction
+The NBA does its very best to provide an equitable schedule for all teams, attempting to minimize back-to-backs and long road trips. However, without a bubble in place, it is nearly impossible to create a schedule that affords each team the same travel experience. As a result, imbalances in the schedule can result in unexpected game outcomes. For example, a team coming off a back-to-back is likely to be more fatigued coming into a game against a team who has had 3 days of rest. So, in a matchup between disparately talented teams, can travel and rest become the equalizer?
+
+
+## Objective
+I posit that a team's strength, or perceived strength, is influenced partly by the team's scheduling. By accounting for these effects, we can better estimate a team's "true skill". Whether this is true or not remains to be seen.
+
+#### Travel and Rest Landscape
+```{r,echo=FALSE}
+options(warn=-1)
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(ggrepel))
+library(ggthemes)
+d <- read.csv("../sandbox/data.csv")
+teams <- read.csv("../sandbox/teams.csv")
+n_teams <-  max(teams$id)
+games_played <- vector("list",n_teams)
+team_travel <- vector("list",n_teams)
+team_rest <- vector("list",n_teams)
+i <- 1
+for(team_name in teams$full_name){
+  team_subset <- d %>% filter( team_i == team_name | team_j == team_name)
+  rest_team <- sum( ifelse(team_subset$team_i == team_name,team_subset$rest_i,team_subset$rest_j))
+  travel_team <- sum(ifelse(team_subset$team_i == team_name,team_subset$travel_i,team_subset$travel_j))
+  team_travel[[i]] <- travel_team
+  team_rest[[i]] <- rest_team
+  games_played[[i]] <- nrow(team_subset)
+  i <- i + 1
+}
+rest_df <- data.frame(cbind(team_rest,team_travel,games_played))
+rest_df$team_name <- teams$full_name
+rest_df$team_rest <- as.numeric(rest_df$team_rest)
+rest_df$team_travel <- as.numeric(rest_df$team_travel)
+rest_df$games_played <- as.numeric(rest_df$games_played)
+rest_df$Conference <- teams$conference
+
+
+ggplot(rest_df,aes(x = team_travel/games_played, y = team_rest/games_played, color = Conference)) + geom_point() + ggthemes::theme_economist(base_size = 12, base_family = "sans") + ggthemes::scale_color_wsj() +
+  geom_text_repel(label = teams$name,nudge_x = 1, nudge_y = .01, check_overlap=T, size = 5, segment.color = NA) + xlab("Kilometers Traveled per Game") + ylab("Rest Days per Game") + ggtitle("Rest and Travel in the NBA",subtitle = "A Tale of Two Conferences")
+
+```
+I've calculated rest as the number of days in between games, and travel as the number of kilometers between destinations. A nice pattern emerges. We see that Eastern Conference teams in general have the least amount of travel, with the tough exception of the Celtics and Heat. This follows from intuition, as most teams in the northeast are close to each other. The West presents the opposite, as teams are more spread out.
+
+#### Road Trip Analysis
+In order to dive deeper, we can look for certain trends over the course of the season, identifying long road trips or periods with quick turnarounds. Furthermore, we can look at the average length of a road trip, which is defined by the kilometers accumulated on a road trip.
+```{r, echo=FALSE}
+avg_road_trip_length <- vector("list",n_teams)
+avg_road_trip_duration <- vector("list",n_teams)
+avg_home_stand_duration <- vector("list", n_teams)
+i <- 1
+for(team_name in teams$full_name){
+  team_subset <- d %>% filter( team_i == team_name | team_j == team_name) %>% arrange(Date_Clean) %>% mutate(travel = ifelse(team_i == team_name, travel_i, travel_j))
+  visitor_runs <- rle(team_subset$Home.Neutral != team_name)
+  my_visitor_runs <- which(visitor_runs$values == TRUE)
+  visitor_runs.lengths.cumsum <- cumsum(visitor_runs$lengths)
+  visit_ends <- visitor_runs.lengths.cumsum[my_visitor_runs]
+  newindex <- ifelse(my_visitor_runs > 1,my_visitor_runs -1, 0 )
+  visit_starts <- visitor_runs.lengths.cumsum[newindex] + 1
+  road_trip_duration <- 0
+  road_trip_length <- 0
+  if (0 %in% newindex) visit_starts <- c(1,visit_starts)
+  for (j in seq_along(visit_starts)) {
+    sub_frame <- team_subset[visit_starts[j]:visit_ends[j],]
+    road_trip_length <- road_trip_length + sum(as.numeric(sub_frame$Visitor.Travel))
+    road_trip_duration <- road_trip_duration + sum(as.numeric(sub_frame$Visitor.Rest))
+  }
+  avg_road_trip_duration[[i]] <- road_trip_duration/length(visit_starts)
+  avg_road_trip_length[[i]] <- road_trip_length/length(visit_starts)
+
+  home_runs <- rle(team_subset$Home.Neutral == team_name)
+  my_home_runs <- which(home_runs$values == TRUE)
+  home_runs.lengths.cumsum <- cumsum(home_runs$lengths)
+  home_ends <- home_runs.lengths.cumsum[my_home_runs]
+  newindex <- ifelse(my_home_runs > 1,my_home_runs -1, 0 )
+  home_starts <- home_runs.lengths.cumsum[newindex] + 1
+  if (0 %in% newindex) home_starts <- c(1,home_starts)
+  home_stand_duration <- 0
+  for (j in seq_along(home_starts)) {
+    sub_frame <- team_subset[home_starts[j]:home_ends[j],]
+    home_stand_duration <- home_stand_duration + sum(sub_frame$Home.Rest)
+  }
+  avg_home_stand_duration[[i]] <- home_stand_duration/length(home_starts)
+
+  i <- i + 1
+}
+trip_df <- data.frame(cbind(as.numeric(avg_road_trip_length),as.numeric(avg_road_trip_duration),as.numeric(avg_home_stand_duration)))
+colnames(trip_df) <- c("avg_road_trip_length","avg_road_trip_duration","avg_home_stand_duration")
+trip_df$team_name <- teams$full_name
+trip_df$Conference <- teams$conference
+
+ggplot(trip_df,aes(x = avg_road_trip_duration, y = avg_road_trip_length, color = Conference)) + geom_point() + ggthemes::theme_economist(base_size = 12, base_family = "sans") + ggthemes::scale_color_wsj() +
+  geom_text_repel(label = teams$name,nudge_x = .1, nudge_y = 1, check_overlap=T, size = 5, segment.color = NA) + ylab("Kilometers Traveled per Road Trip") + xlab("Days per Road Trip") + ggtitle("Road Trips in the NBA",subtitle = "A Tale of Two Conferences")
+
+```
+
+As we can see, the NBA does a good job of balancing out rest in between long road trips. However, there does seem to be the same disparity between East and West teams as we saw previously. The Western teams by nature of being spread out, have longer road trips.
+
+```{r,echo=FALSE}
+ggplot(trip_df,aes(x = avg_road_trip_duration, y = avg_home_stand_duration, color = Conference)) + geom_point() + ggthemes::theme_economist(base_size = 12, base_family = "sans") + ggthemes::scale_color_wsj() +
+  geom_text_repel(label = teams$name,nudge_x = .1, nudge_y = .1, check_overlap=T, size = 5, segment.color = NA) + ylab("Days Per Home Stand") + xlab("Days per Road Trip") + ggtitle("Road vs. Home Splits") + geom_abline(intercept = 0, slope = 1, col = "black")
+```
+
+Similarly, we can see how the NBA splits up home and away stands. Most teams fall above the line of equality, suggesting that the NBA prefers teams spend more continuous time at home than on the road.
+
+#### Effect on Game Play
+Here I'll conduct an analysis of how the schedule affects how we perceive team strength. To do so, I'll build a mixed effects model that estimates the chances of $team_i$ beating $team_j$.
+\[
+y_{ijt} = (\theta_i + \alpha_{i} home_{it}) - (\theta_j + \alpha_{j} home_{jt})
+\]
+where $y_{ijt}$ is the margin of victory of $team_i$ over $team_j$ at time $t$.
+We can interpret the parameter $\theta_i$ as the *skill* of a team, as it relates to the team's average effect on their game's margin. Similarly, we can interpret the parameter $\alpha$ as the team's average benefit from playing at home.
+The full details of the model are included in the `model.stan` file. The model borrows methodology from [here](`http://doogan.us/nj/NCAA2018.html`).
+
+```{r,echo=FALSE,results="hide"}
+suppressPackageStartupMessages(library(rstan))
+d$outcome_ij <- 1
+sd <- list(N = nrow(d),
+           y = d$margin_ij,
+           z = d$outcome_ij,
+           h_i = d$home_i,
+           h_j = d$home_j,
+           team_i = d$id_i,
+           team_j = d$id_j,
+           N_g = nrow(teams)
+)
+
+fit <- stan("../model/model.stan", iter = 2000, warmup = 500, data = sd, chains = 4)
+```
+
+```{r,echo=FALSE}
+theta <- extract(fit)$beta_p[, , 1]
+colnames(theta) <- teams$full_name
+
+summary_theta <- apply(theta, 2, function(x) c(mean=mean(x), quantile(x,c(.025,.975,.25,.75))))
+top30 <- summary_theta[,order(summary_theta[1,], decreasing=T)[1:30]]
+
+par(mai=c(1,2,.75,.75))
+plot(NA, xlim=c(min(top30),max(top30)), ylim=c(1,30), ylab='',
+  xlab='Skill', yaxt='n')
+title(main=expression("Team Specific Latent Skill ("*theta*") Estimate with 50% & 95% Credible Intervals"), cex.main=.85)
+for(i in seq(ncol(top30))) {
+  lines(c(-100,100), rep(31-i,2), lty=3, lwd=.5, col=rgb(.5,.5,.5))
+  lines(top30[2:3,i],rep(31-i,2), lwd=1)
+  lines(top30[4:5,i],rep(31-i,2), lwd=3)
+  points(top30[1,i],31-i, cex=1, pch=20, col=rgb(.6,0,0))
+  axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
+}
+
+alpha <- extract(fit)$beta_p[, , 2]
+colnames(alpha) <- teams$full_name
+
+summary_alpha <- apply(alpha, 2, function(x) c(mean=mean(x), quantile(x,c(.025,.975,.25,.75))))
+top30 <- summary_alpha[,order(summary_alpha[1,], decreasing=T)[1:30]]
+
+par(mai=c(1,2,.75,.75))
+plot(NA, xlim=c(min(top30),max(top30)), ylim=c(1,30), ylab='',
+  xlab='Home Advantage', yaxt='n')
+title(main=expression("Team Specific Home Advantage ("*alpha*") Estimate with 50% & 95% Credible Intervals"), cex.main=.85)
+for(i in seq(ncol(top30))) {
+  lines(c(-100,100), rep(31-i,2), lty=3, lwd=.5, col=rgb(.5,.5,.5))
+  lines(top30[2:3,i],rep(31-i,2), lwd=1)
+  lines(top30[4:5,i],rep(31-i,2), lwd=3)
+  points(top30[1,i],31-i, cex=1, pch=20, col=rgb(.6,0,0))
+  axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
+}
+```
+
+Here, we can extract the latent skill of each team, as well as their home team advantage. From the plot, we can see that the top teams in skill are ones that we'd expect. However, these effects are absorbing the variance from the schedule. In order to further refine our rankings of the teams, we'd have to include the rest and travel as covariates in the model. From intuition, we'd expect less rest to take away from a team's ability, and more travel to do the same. Furthermore, we'd expect rest to decay the effect of long travel; effectively, the longer a team rests, the less effect travel has. Therefore, I model $fatigue_i = log(travel_i + 1)/rest_i$, and fit a team-varying fatigue effect. Here, $\omega_i$ represents how much a team's scoring margin is negatively affected by travel.
+\[
+  y_{ijt} = (\theta_i + \alpha_{i} home_{it} - \omega_i fatigue_{it}) - (\theta_j + \alpha_{j} home_{jt} - \omega_j fatigue_{jt})
+\]
+ Further model details are located in `model_rest.stan`.
+
+```{r,echo=FALSE,results="hide"}
+sd_rest <- list(N = nrow(d),
+           y = d$margin_ij,
+           z = d$outcome_ij,
+           h_i = d$home_i,
+           h_j = d$home_j,
+           team_i = d$id_i,
+           team_j = d$id_j,
+          rest_i = log(1 +d$travel_i)/d$rest_i,
+          rest_j = log(1 + d$travel_j)/d$rest_j,
+           N_g = nrow(teams)
+)
+
+fit_rest <- stan("../model/model_rest.stan", iter = 2000, warmup = 500, data = sd_rest, chains = 4)
+
+```
+
+```{r,echo=FALSE}
+theta_rest <- extract(fit_rest)$beta_p[, , 1]
+colnames(theta_rest) <- teams$full_name
+
+summary_theta_rest <- apply(theta_rest, 2, function(x) c(mean=mean(x), quantile(x,c(.025,.975,.25,.75))))
+top30 <- summary_theta_rest[,order(summary_theta_rest[1,], decreasing=T)[1:30]]
+
+par(mai=c(1,2,.75,.75))
+plot(NA, xlim=c(min(top30),max(top30)), ylim=c(1,30), ylab='',
+  xlab='Skill', yaxt='n')
+title(main=expression("Team Specific Latent Skill ("*theta*") Estimate with 50% & 95% Credible Intervals"), cex.main=.85)
+for(i in seq(ncol(top30))) {
+  lines(c(-100,100), rep(31-i,2), lty=3, lwd=.5, col=rgb(.5,.5,.5))
+  lines(top30[2:3,i],rep(31-i,2), lwd=1)
+  lines(top30[4:5,i],rep(31-i,2), lwd=3)
+  points(top30[1,i],31-i, cex=1, pch=20, col=rgb(.6,0,0))
+  axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
+}
+```
+Initially, after adjusting for fatigue, we see the true skill estimates do not change much, if at all.
+
+```{r,echo=FALSE}
+alpha_rest <- extract(fit_rest)$beta_p[, , 2]
+colnames(alpha_rest) <- teams$full_name
+
+summary_alpha_rest <- apply(alpha_rest, 2, function(x) c(mean=mean(x), quantile(x,c(.025,.975,.25,.75))))
+top30 <- summary_alpha_rest[,order(summary_alpha_rest[1,], decreasing=T)[1:30]]
+
+par(mai=c(1,2,.75,.75))
+plot(NA, xlim=c(min(top30),max(top30)), ylim=c(1,30), ylab='',
+  xlab='Home Advantage', yaxt='n')
+title(main=expression("Team Specific Home Advantage ("*alpha*") Estimate with 50% & 95% Credible Intervals"), cex.main=.85)
+for(i in seq(ncol(top30))) {
+  lines(c(-100,100), rep(31-i,2), lty=3, lwd=.5, col=rgb(.5,.5,.5))
+  lines(top30[2:3,i],rep(31-i,2), lwd=1)
+  lines(top30[4:5,i],rep(31-i,2), lwd=3)
+  points(top30[1,i],31-i, cex=1, pch=20, col=rgb(.6,0,0))
+  axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
+}
+```
+Here, first we see that the average effect of the home advantage is slightly reduced. An unintuitive result, but it could be explained by the sequencing of the schedule. For example, teams are more likely to win when they are at home not because they are at home, but because the visiting team has more mileage and less rest when arriving to play.
+In the same vein, we saw earlier that teams spend more time at home than on the road; this suggests teams on the road travel more with less rest when they come to play a home team. This further strengthens the idea that part of home advantage can be attributed to the fatigue of the visiting team.
+
+
+```{r,echo=FALSE}
+omega <- extract(fit_rest)$omega
+colnames(omega) <- teams$full_name
+
+summary_omega <- apply(omega, 2, function(x) c(mean=mean(x), quantile(x,c(.025,.975,.25,.75))))
+top30 <- summary_omega[,order(summary_omega[1,], decreasing=F)[1:30]]
+
+par(mai=c(1,2,.75,.75))
+plot(NA, xlim=c(min(top30),max(top30)), ylim=c(1,30), ylab='',
+  xlab='Fatigue', yaxt='n')
+title(main=expression("Team Specific Fatigue Disadvantage ("*omega*") Estimate with 50% & 95% Credible Intervals"), cex.main=.85)
+for(i in seq(ncol(top30))) {
+  lines(c(-100,100), rep(31-i,2), lty=3, lwd=.5, col=rgb(.5,.5,.5))
+  lines(top30[2:3,i],rep(31-i,2), lwd=1)
+  lines(top30[4:5,i],rep(31-i,2), lwd=3)
+  points(top30[1,i],31-i, cex=1, pch=20, col=rgb(.6,0,0))
+  axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
+}
+```
+
+Finally, it is interesting to look at the fatigue coefficients, ranked in descending order. This value indicates how much a team's scoring margin is affected by the scheduling, *relative to their skill*. It is interesting to see the Nuggets near the top! They are known for having depth in their roster; players' minutes are more evenly distributed, leading to less wear game after game. Furthermore, their altitude adjustments may be helping. It is also affirming to see the small-ball Rockets near the bottom, given their fatiguing style of play.
+
+
+```{r,echo=FALSE}
+compare <- function(i,j,th,a,sig,homei=0,homej=0,repl=10) {
+  reps <- replicate(repl, mean((th[,i] - th[,j] + a[,i]*homei - a[,j]*homej +
+                                rnorm(nrow(th),0,sig)) > 0))
+  setNames(c(mean(reps),sd(reps)/sqrt(repl)), c(paste(i,'>',j),'mcmcSE'))
+}
+
+compare_rest <- function(i,j,th,a,omeg,sig,homei=0,homej=0,traveli=0,travelj=0,repl=10) {
+  reps <- replicate(repl, mean((th[,i] - th[,j] + a[,i]*homei - a[,j]*homej -omeg[,i] * traveli + omeg[,j] * travelj +
+                                rnorm(nrow(th),0,sig)) > 0))
+  setNames(c(mean(reps),sd(reps)/sqrt(repl)), c(paste(i,'>',j),'mcmcSE'))
+}
+
+cv <- function(test,a,adv,sig) {
+  res <- apply(test, 1, function(x) {
+    igtj <- compare(x[14],x[15],a,adv,sig,homei=as.numeric(x[19]),homej=as.numeric(x[20]),repl=20)[1]
+    return(igtj > .5)
+
+  })
+  mean(res)
+}
+
+cv_rest <- function(test,a,adv,omeg,sig) {
+  res <- apply(test, 1, function(x) {
+    igtj <- compare_rest(x[14],x[15],a,adv,omeg,sig,homei=as.numeric(x[19]),homej=as.numeric(x[20]),traveli = log(as.numeric(x[28]) + 1)/as.numeric(x[12]),
+                         travelj = log(as.numeric(x[29]) + 1)/as.numeric(x[13]), repl=20)[1]
+    return(igtj > .5)
+
+  })
+  mean(res)
+}
+
+ll <- cv(d,a=theta,adv=alpha,sig=extract(fit)$sigma)
+ll_rest <- cv_rest(d,a=theta_rest,adv=alpha_rest,omeg=omega,sig=extract(fit_rest)$sigma)
+```
+
+#### Model Validation & Future Work
+The model incorporating rest improved accuracy ever so slightly from $69.5%$ to $69.6$; although this is a very slight improvement, it does suggest there is some noise being extracted from fatigue related features. Although my initial hypothesis regarding team skill and travel was incorrect, I did receive insight into how fatigue may inflate the effect size of home court advantage.
+
+There is evidence to suggest that Western Conference teams are intrinsically stronger, and since we have seen that they do travel more, these travel and team strength effects could be confounded. This would cause the impact of travel to be underestimated, since longer travel is usually associated with Western teams.
+
+Future work would involve including a nested structure of the model, by conference.
