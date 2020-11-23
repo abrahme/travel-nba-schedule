@@ -47,6 +47,7 @@ ggplot(rest_df,aes(x = team_travel/games_played, y = team_rest/games_played, col
   geom_text_repel(label = teams$name,nudge_x = 1, nudge_y = .01, check_overlap=T, size = 5, segment.color = NA) + xlab("Kilometers Traveled per Game") + ylab("Rest Days per Game") + ggtitle("Rest and Travel in the NBA",subtitle = "A Tale of Two Conferences")
 
 ```
+
 I've calculated rest as the number of days in between games, and travel as the number of kilometers between destinations. A nice pattern emerges. We see that Eastern Conference teams in general have the least amount of travel, with the tough exception of the Celtics and Heat. This follows from intuition, as most teams in the northeast are close to each other. The West presents the opposite, as teams are more spread out.
 
 #### Road Trip Analysis
@@ -215,6 +216,7 @@ for(i in seq(ncol(top30))) {
   axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
 }
 ```
+
 Initially, after adjusting for fatigue, we see the true skill estimates do not change much, if at all.
 
 ```{r,echo=FALSE}
@@ -236,6 +238,7 @@ for(i in seq(ncol(top30))) {
   axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
 }
 ```
+
 Here, first we see that the average effect of the home advantage is slightly reduced. An unintuitive result, but it could be explained by the sequencing of the schedule. For example, teams are more likely to win when they are at home not because they are at home, but because the visiting team has more mileage and less rest when arriving to play.
 In the same vein, we saw earlier that teams spend more time at home than on the road; this suggests teams on the road travel more with less rest when they come to play a home team. This further strengthens the idea that part of home advantage can be attributed to the fatigue of the visiting team.
 
