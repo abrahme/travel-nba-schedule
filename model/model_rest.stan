@@ -1,7 +1,6 @@
 data{
     int N; // number of observations
     vector[N] y; // target margin
-    int<lower=0,upper=1> z[N]; // target win or loss
     int team_i[N]; // team i vector
     int team_j[N]; // team j vector
     int h_i[N]; // home team i
@@ -41,6 +40,5 @@ model{
 
 // the likelihood
     y ~ normal(mu,sigma);
-    z ~ bernoulli_logit(mu); // regularize huge blowouts
 
 }

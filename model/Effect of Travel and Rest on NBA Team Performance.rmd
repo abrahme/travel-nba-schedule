@@ -125,7 +125,7 @@ suppressPackageStartupMessages(library(rstan))
 d$outcome_ij <- 1
 sd <- list(N = nrow(d),
            y = d$margin_ij,
-           z = d$outcome_ij,
+           #z = d$outcome_ij,
            h_i = d$home_i,
            h_j = d$home_j,
            team_i = d$id_i,
@@ -183,7 +183,7 @@ Here, we can extract the latent skill of each team, as well as their home team a
 ```{r,echo=FALSE,results="hide"}
 sd_rest <- list(N = nrow(d),
            y = d$margin_ij,
-           z = d$outcome_ij,
+           #z = d$outcome_ij,
            h_i = d$home_i,
            h_j = d$home_j,
            team_i = d$id_i,
