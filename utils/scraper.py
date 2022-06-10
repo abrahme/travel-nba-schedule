@@ -11,7 +11,7 @@ def get_month(month: str) -> pd.DataFrame:
     :param month: monthst oget datafrom basketball-reference
     :return: pandas data frame of values
     """
-    url = f"https://www.basketball-reference.com/leagues/NBA_2020_games-{month}.html"
+    url = f"https://www.basketball-reference.com/leagues/NBA_2022_games-{month}.html"
     content = requests.get(url).content
     soup = BeautifulSoup(content)
     tables = soup.findAll("table")
@@ -45,7 +45,7 @@ def get_all_months() -> pd.DataFrame:
     :return:
     """
     processed_month_dfs = []
-    season_months = ["october", "november", "december", "january", "february", "march", "july", "august", "september"]
+    season_months = ["october", "november", "december", "january", "february", "march", "april", "may", "june"]
     for month in season_months:
         month_df = get_month(month)
         processed_month_df = split_playoff(month_df)
@@ -187,14 +187,14 @@ def filter_games(df: pd.DataFrame) -> pd.DataFrame:
     :param df:
     :return:
     """
-    return df[(df["game_type"] == "Regular Season") & (df["Attend."].astype(float) > 0)]
+    return df[(df["game_type"] == "Regular Season") & (df["Home PTS"].notnull())]
 
 
 if __name__ == "__main__":
     full_df = get_all_months()
     full_df = calculate_rest(full_df)
-    full_df = create_features(full_df)
     full_df = filter_games(full_df)
+    full_df = create_features(full_df)
     team_df = get_teams()
     team_df.to_csv("../sandbox/teams.csv", index=False)
 
