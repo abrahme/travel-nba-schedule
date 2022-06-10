@@ -21,6 +21,25 @@ suppressPackageStartupMessages(library(ggrepel))
 library(ggthemes)
 d <- read.csv("../sandbox/data.csv")
 teams <- read.csv("../sandbox/teams.csv")
+
+## need to add game number for home and visitor for each 
+team_vec <- rep(0,nrow(teams))
+names(team_vec) <- teams$full_name
+home_vec_games <- rep(0, nrow(d))
+away_vec_games <- rep(0,nrow(d))
+for (row in 1:nrow(d)){
+  visitor <- d[row,"Visitor.Neutral"]
+  home <- d[row,"Home.Neutral"]
+  team_vec[home] <- team_vec[home] + 1
+  team_vec[visitor] <- team_vec[visitor] + 1
+  home_vec_games[row] <- team_vec[home]
+  away_vec_games[row] <- team_vec[visitor]
+}
+d$visitor_t <- away_vec_games
+d$home_t <- home_vec_games
+d <- d %>% mutate(t_i = if_else(Home.PTS > Visitor.PTS, home_t, visitor_t), 
+             t_j = if_else(Home.PTS < Visitor.PTS, home_t, visitor_t)) %>% filter(t_i <= 82)
+
 n_teams <-  max(teams$id)
 games_played <- vector("list",n_teams)
 team_travel <- vector("list",n_teams)
@@ -44,7 +63,7 @@ rest_df$Conference <- teams$conference
 
 
 ggplot(rest_df,aes(x = team_travel/games_played, y = team_rest/games_played, color = Conference)) + geom_point() + ggthemes::theme_economist(base_size = 12, base_family = "sans") + ggthemes::scale_color_wsj() +
-  geom_text_repel(label = teams$name,nudge_x = 1, nudge_y = .01, check_overlap=T, size = 5, segment.color = NA) + xlab("Kilometers Traveled per Game") + ylab("Rest Days per Game") + ggtitle("Rest and Travel in the NBA",subtitle = "A Tale of Two Conferences")
+  geom_text_repel(label = teams$name,nudge_x = .01, nudge_y = .01, check_overlap=F, size = 2, segment.color = NA) + xlab("Kilometers Traveled per Game") + ylab("Rest Days per Game") + ggtitle("Rest and Travel in the NBA",subtitle = "A Tale of Two Conferences")
 
 ```
 
@@ -112,69 +131,51 @@ ggplot(trip_df,aes(x = avg_road_trip_duration, y = avg_home_stand_duration, colo
 Similarly, we can see how the NBA splits up home and away stands. Most teams fall above the line of equality, suggesting that the NBA prefers teams spend more continuous time at home than on the road.
 
 #### Effect on Game Play
-Here I'll conduct an analysis of how the schedule affects how we perceive team strength. To do so, I'll build a mixed effects model that estimates the chances of $team_i$ beating $team_j$.
+Here I'll conduct an analysis of how the schedule affects how we perceive team strength. To do so, I'll build a dynamic linear model that estimates the chances of $team_i$ beating $team_j$ at time $t$.
 \[
-y_{ijt} = (\theta_i + \alpha_{i} home_{it}) - (\theta_j + \alpha_{j} home_{jt})
+y_{ijt} = (\theta_{it} + \alpha_{i} home_{it}) - (\theta_{jt} + \alpha_{j} home_{jt})
 \]
 where $y_{ijt}$ is the margin of victory of $team_i$ over $team_j$ at time $t$.
-We can interpret the parameter $\theta_i$ as the *skill* of a team, as it relates to the team's average effect on their game's margin. Similarly, we can interpret the parameter $\alpha$ as the team's average benefit from playing at home.
+We can interpret the parameter $\theta_{it}$ as the *skill* of a team at time $t$, as it relates to the team's average effect on their game's margin. Similarly, we can interpret the parameter $\alpha$ as the team's average benefit from playing at home.
 The full details of the model are included in the [`model.stan`](https://github.com/abrahme/travel-nba-schedule/blob/main/model/model.stan) file. The model borrows methodology from [here](`http://doogan.us/nj/NCAA2018.html`).
+
+
 
 ```{r,echo=FALSE,results="hide"}
 suppressPackageStartupMessages(library(rstan))
 d$outcome_ij <- 1
 sd <- list(N = nrow(d),
            y = d$margin_ij,
-           #z = d$outcome_ij,
            h_i = d$home_i,
            h_j = d$home_j,
            team_i = d$id_i,
            team_j = d$id_j,
-           N_g = nrow(teams)
+           N_g = nrow(teams),
+           N_t = max(d$t_i,d$t_j),
+           games_i = d$t_i,
+           games_j = d$t_j,
+           initial_prior = 0
 )
+model <- stan_model("../model/model.stan")
+fit <- sampling(model, sd, warmup = 500, chains = 4, iter = 2000)
+fit_df <- as.data.frame(fit)
+fit_posterior_mean <- as_tibble(lapply(fit_df,mean,1))
 
-fit <- stan("../model/model.stan", iter = 2000, warmup = 500, data = sd, chains = 4)
 ```
 
 ```{r,echo=FALSE}
-theta <- extract(fit)$beta_p[, , 1]
-colnames(theta) <- teams$full_name
-
-summary_theta <- apply(theta, 2, function(x) c(mean=mean(x), quantile(x,c(.025,.975,.25,.75))))
-top30 <- summary_theta[,order(summary_theta[1,], decreasing=T)[1:30]]
-
-par(mai=c(1,2,.75,.75))
-plot(NA, xlim=c(min(top30),max(top30)), ylim=c(1,30), ylab='',
-  xlab='Skill', yaxt='n')
-title(main=expression("Team Specific Latent Skill ("*theta*") Estimate with 50% & 95% Credible Intervals"), cex.main=.85)
-for(i in seq(ncol(top30))) {
-  lines(c(-100,100), rep(31-i,2), lty=3, lwd=.5, col=rgb(.5,.5,.5))
-  lines(top30[2:3,i],rep(31-i,2), lwd=1)
-  lines(top30[4:5,i],rep(31-i,2), lwd=3)
-  points(top30[1,i],31-i, cex=1, pch=20, col=rgb(.6,0,0))
-  axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
+library(glue)
+library(tidyr)
+theta_hat_matrix <- matrix(0, nrow = sd$N_g, ncol = sd$N_t)
+for (i in 1:sd$N_g) {
+  theta_hat_matrix[i,] <- as.numeric(fit_posterior_mean %>% select(starts_with(glue("theta[{i},"))) %>% slice(1))
 }
+theta_hat_matrix_rs <- as_tibble(theta_hat_matrix) %>% select(1:82) %>% mutate(team_id = row_number()) %>% pivot_longer(c(1:82)) %>% mutate(name = as.integer(substring(name,2))) %>% inner_join(teams, by = c("team_id" = "id")) %>% select(c("abbreviation","value","name.x"))
 
-alpha <- extract(fit)$beta_p[, , 2]
-colnames(alpha) <- teams$full_name
-
-summary_alpha <- apply(alpha, 2, function(x) c(mean=mean(x), quantile(x,c(.025,.975,.25,.75))))
-top30 <- summary_alpha[,order(summary_alpha[1,], decreasing=T)[1:30]]
-
-par(mai=c(1,2,.75,.75))
-plot(NA, xlim=c(min(top30),max(top30)), ylim=c(1,30), ylab='',
-  xlab='Home Advantage', yaxt='n')
-title(main=expression("Team Specific Home Advantage ("*alpha*") Estimate with 50% & 95% Credible Intervals"), cex.main=.85)
-for(i in seq(ncol(top30))) {
-  lines(c(-100,100), rep(31-i,2), lty=3, lwd=.5, col=rgb(.5,.5,.5))
-  lines(top30[2:3,i],rep(31-i,2), lwd=1)
-  lines(top30[4:5,i],rep(31-i,2), lwd=3)
-  points(top30[1,i],31-i, cex=1, pch=20, col=rgb(.6,0,0))
-  axis(2, at=31-i, label=paste(colnames(top30)[i],i),las=2,cex.axis=.8)
-}
+theta_hat_matrix_rs %>% ggplot(aes(x = name.x, y = value)) + geom_line() + facet_wrap(~abbreviation) + xlab("Game Number") + ylab("Team Strength") + ggtitle("Team Strengths over Course of Season")
 ```
 
-Here, we can extract the latent skill of each team, as well as their home team advantage. From the plot, we can see that the top teams in skill are ones that we'd expect. However, these effects are absorbing the variance from the schedule. In order to further refine our rankings of the teams, we'd have to include the rest and travel as covariates in the model. From intuition, we'd expect less rest to take away from a team's ability, and more travel to do the same. Furthermore, we'd expect rest to decay the effect of long travel; effectively, the longer a team rests, the less effect travel has. Therefore, I model $fatigue_i = log(travel_i + 1)/rest_i$, and fit a team-varying fatigue effect. Here, $\omega_i$ represents how much a team's scoring margin is negatively affected by travel.
+Here, we can look at how the team strengths changed over time.
 \[
   y_{ijt} = (\theta_i + \alpha_{i} home_{it} - \omega_i fatigue_{it}) - (\theta_j + \alpha_{j} home_{jt} - \omega_j fatigue_{jt})
 \]
@@ -183,17 +184,28 @@ Here, we can extract the latent skill of each team, as well as their home team a
 ```{r,echo=FALSE,results="hide"}
 sd_rest <- list(N = nrow(d),
            y = d$margin_ij,
-           #z = d$outcome_ij,
            h_i = d$home_i,
            h_j = d$home_j,
            team_i = d$id_i,
            team_j = d$id_j,
-          rest_i = log(1 +d$travel_i)/d$rest_i,
-          rest_j = log(1 + d$travel_j)/d$rest_j,
-           N_g = nrow(teams)
+          fatigue_i = log(1 +d$travel_i)/d$rest_i,
+          fatigue_j = log(1 + d$travel_j)/d$rest_j,
+           N_g = nrow(teams),
+           N_t = max(d$t_i,d$t_j),
+           games_i = d$t_i,
+           games_j = d$t_j,
+           initial_prior = 0
 )
 
 fit_rest <- stan("../model/model_rest.stan", iter = 2000, warmup = 500, data = sd_rest, chains = 4)
+fit_posterior_mean_rest <- as_tibble(lapply(as.data.frame(fit_rest),mean,1))
+theta_hat_matrix_rest <- matrix(0, nrow = sd$N_g, ncol = sd$N_t)
+for (i in 1:sd$N_g) {
+  theta_hat_matrix_rest[i,] <- as.numeric(fit_posterior_mean_rest %>% select(starts_with(glue("theta[{i},"))) %>% slice(1))
+}
+theta_hat_matrix_rest <- as_tibble(theta_hat_matrix_rest) %>% select(1:82) %>% mutate(team_id = row_number()) %>% pivot_longer(c(1:82)) %>% mutate(name = as.integer(substring(name,2))) %>% inner_join(teams, by = c("team_id" = "id")) %>% select(c("abbreviation","value","name.x"))
+
+theta_hat_matrix_rest %>% ggplot(aes(x = name.x, y = value)) + geom_line() + facet_wrap(~abbreviation) + xlab("Game Number") + ylab("Team Strength") + ggtitle("Team Strengths over Course of Season")
 
 ```
 

@@ -5,40 +5,32 @@ data{
     int team_j[N]; // team j vector
     int h_i[N]; // home team i
     int h_j[N]; // home team j
-    int N_g; // number of players (groups)
-    real rest_i[N]; // covariate rest i
-    real rest_j[N]; // covariate rest j
+    int N_g; // number of teams (groups)
+    int games_i[N]; // number of games played i (time step)
+    int games_j[N]; // number of games played j (time step)
+    int N_t; // max number of games played 
+    real initial_prior; // initial theta values
+    real fatigue_i[N]; // rest for team i
+    real fatigue_j[N]; // rest for team j
 }
 parameters{
-    vector[2] beta_p[N_g]; // vector for slope and intercept
-    vector<lower=0>[2] sigma_p; // sd for intercept and slope
-    vector[2] beta; // intercept and slope hyper priors
-    corr_matrix[2] Omega; // correlation matrix
-    vector<lower=0>[N_g] omega;
-    real<lower=0> sigma;
-    real<lower=0> tau_omega;
+  real a; // correlation parameter
+  real<lower=0> tau; // random variation
+  matrix[N_g, N_t] theta;
+  real<lower=0> sigma; // standard deviation of total model
+  real<lower=0> w; // random noise from state space
+  real home; // intercept for home indicator
+  real fatigue;
 }
-
 model{
-    // vector for conditional mean storage
-    vector[N] mu;
-
-    // priors
-    Omega ~ lkj_corr(2);
-    sigma_p ~ exponential(1);
-    beta ~ normal(0,1);
-    tau_omega ~ cauchy(0,.25)T[0,];
-    sigma ~ cauchy(0,1)T[0,];
-    beta_p ~ multi_normal(beta, quad_form_diag(Omega,sigma_p));
-    omega ~ lognormal(0,tau_omega);
-
-    // define mu for the Gaussian
-    for( t in 1:N ) {
-      mu[t] = (beta_p[team_i[t],1] + beta_p[team_i[t],2]*h_i[t] -omega[team_i[t]]*rest_i[t]) -
-              (beta_p[team_j[t],1] + beta_p[team_j[t],2]*h_j[t] -omega[team_j[t]]*rest_j[t]);
-    }
-
-// the likelihood
-    y ~ normal(mu,sigma);
-
+  ### state space model
+    theta[,1] ~ normal(initial_prior, tau);
+    for(t in 2:N_t) {
+      for (g in 1:N_g){
+        theta[g,t] ~ normal(a*theta[g,t-1],w);
+  }
+}
+   for (i in 1:N){
+     y[i] ~ normal(theta[team_i[i],games_i[i]] + h_i[i] * home + fatigue_i[i]*fatigue  - theta[team_j[i],games_j[i]] - h_j[i] * home - fatigue_j[i]*fatigue, sigma);
+   }
 }
